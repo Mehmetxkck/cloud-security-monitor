@@ -1,0 +1,65 @@
+[
+    {
+        "timestamp": "2026-11-21T10:00:00",
+        "ip_address": "192.168.1.10",
+        "username": "mehmet",
+        "event_type": "login_success",
+        "status": "success"
+    },
+    {
+        "timestamp": "2026-11-21T10:01:00",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "login_failed",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:02:00",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "login_failed",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:03:00",
+        "ip_address": "192.168.1.15",
+        "username": "ahmet",
+        "event_type": "login_success",
+        "status": "success"
+    },
+    {
+        "timestamp": "2026-11-21T10:04:00",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "unauthorized_access",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:05:00",
+        "ip_address": "192.0.2.50",
+        "username": "test_user",
+        "event_type": "login_failed",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:01:10",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "login_failed",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:01:20",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "login_failed",
+        "status": "failed"
+    },
+    {
+        "timestamp": "2026-11-21T10:01:30",
+        "ip_address": "203.0.113.25",
+        "username": "admin",
+        "event_type": "login_failed",
+        "status": "failed"
+    }
+]
