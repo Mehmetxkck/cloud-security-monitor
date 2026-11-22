@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+from pydantic import ValidationError
+from app.schemas.log_schema import SecurityLog
 
 
 REQUIRED_FIELDS = [
@@ -24,13 +26,12 @@ def load_logs():
 
 
 def validate_log(log):
-    """Log kaydında gerekli alanların bulunup bulunmadığını kontrol eder."""
+    try:
+        SecurityLog.model_validate(log)
+        return True
 
-    for field in REQUIRED_FIELDS:
-        if field not in log:
-            return False
-
-    return True
+    except ValidationError:
+        return False
 
 
 def find_missing_fields(log):

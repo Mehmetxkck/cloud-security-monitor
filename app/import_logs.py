@@ -16,11 +16,14 @@ def import_logs():
     with get_connection() as connection:
         with connection.cursor() as cursor:
             for log in valid_logs:
+
                 cursor.execute(
                     """
                     INSERT INTO security_logs
                     (timestamp, ip_address, username, event_type, status)
                     VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT ON CONSTRAINT unique_security_log
+                    DO NOTHING
                     """,
                     (
                         log["timestamp"],
@@ -31,7 +34,8 @@ def import_logs():
                     )
                 )
 
-                inserted_count += 1
+                if cursor.rowcount == 1:
+                    inserted_count += 1
 
         connection.commit()
 
