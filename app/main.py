@@ -1,5 +1,10 @@
 
 from fastapi import FastAPI
+from app.database import (
+    fetch_all_logs,
+    save_security_alert,
+    fetch_security_alerts
+)
 from app.log_parser import (
     load_logs,
     validate_all_logs,
@@ -32,15 +37,11 @@ def health_check():
 
 @app.get("/logs")
 def get_logs():
-    logs = load_logs()
-
-    valid_logs, invalid_logs = validate_all_logs(logs)
+    logs = fetch_all_logs()
 
     return {
         "total_logs": len(logs),
-        "valid_logs": len(valid_logs),
-        "invalid_logs": len(invalid_logs),
-        "logs": valid_logs
+        "logs": logs
     }
 
 
@@ -60,13 +61,9 @@ def get_failed_logins():
 
 @app.get("/security/alerts")
 def get_security_alerts():
-    logs = load_logs()
+    logs = fetch_all_logs()
 
-    valid_logs, invalid_logs = validate_all_logs(logs)
-
-    grouped_logs = group_failed_logins(valid_logs)
-
-    alerts = []
+    grouped_logs = group_failed_logins(logs)
 
     for ip, timestamps in grouped_logs.items():
         if detect_brute_force(timestamps):
@@ -77,7 +74,9 @@ def get_security_alerts():
                 "message": "Multiple failed login attempts detected"
             }
 
-            alerts.append(alert)
+            save_security_alert(alert)
+
+    alerts = fetch_security_alerts()
 
     return {
         "total_alerts": len(alerts),
