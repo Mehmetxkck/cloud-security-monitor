@@ -21,52 +21,82 @@ LIMIT 5;
 """
 
 
-def benchmark_query(connection, use_index, runs=100):
-    times = []
+def execute_query(cursor, use_index):
+    if use_index:
+        cursor.execute("SET enable_seqscan = off")
+    else:
+        cursor.execute("SET enable_seqscan = on")
+
+    start = time.perf_counter()
+
+    cursor.execute(QUERY)
+    cursor.fetchall()
+
+    return (time.perf_counter() - start) * 1000
+
+
+def get_query_plan(cursor, use_index):
+    if use_index:
+        cursor.execute("SET enable_seqscan = off")
+    else:
+        cursor.execute("SET enable_seqscan = on")
+
+    cursor.execute("EXPLAIN " + QUERY)
+    return "\n".join(row[0] for row in cursor.fetchall())
+
+
+def benchmark(connection, runs=100, warmup=20):
+    normal_times = []
+    indexed_times = []
 
     with connection.cursor() as cursor:
-        if use_index:
-            cursor.execute("SET enable_seqscan = off")
-        else:
-            cursor.execute("SET enable_seqscan = on")
+        # Warm up both configurations
+        for _ in range(warmup):
+            execute_query(cursor, False)
+            execute_query(cursor, True)
 
-        for _ in range(runs):
-            start = time.perf_counter()
+        # Alternate measurement order
+        for i in range(runs):
+            if i % 2 == 0:
+                normal_times.append(execute_query(cursor, False))
+                indexed_times.append(execute_query(cursor, True))
+            else:
+                indexed_times.append(execute_query(cursor, True))
+                normal_times.append(execute_query(cursor, False))
 
-            cursor.execute(QUERY)
-            cursor.fetchall()
+        normal_plan = get_query_plan(cursor, False)
+        indexed_plan = get_query_plan(cursor, True)
 
-            elapsed = (
-                time.perf_counter() - start
-            ) * 1000
+    return normal_times, indexed_times, normal_plan, indexed_plan
 
-            times.append(elapsed)
 
+def summarize(times):
     return {
-        "mean_ms": statistics.mean(times),
-        "median_ms": statistics.median(times),
-        "min_ms": min(times),
-        "max_ms": max(times)
+        "mean_ms": round(statistics.mean(times), 6),
+        "median_ms": round(statistics.median(times), 6),
+        "min_ms": round(min(times), 6),
+        "max_ms": round(max(times), 6)
     }
 
 
 def main():
     with psycopg.connect(**DB_CONFIG) as connection:
-        normal = benchmark_query(
-            connection,
-            use_index=False
-        )
-
-        indexed = benchmark_query(
-            connection,
-            use_index=True
-        )
+        normal, indexed, normal_plan, indexed_plan = benchmark(connection)
 
     print("\nPostgreSQL Query Benchmark")
-    print("-" * 40)
+    print("-" * 45)
 
-    print("Normal planner:", normal)
-    print("Seq Scan disabled:", indexed)
+    print("\nNormal planner:")
+    print(summarize(normal))
+
+    print("\nSeq Scan disabled:")
+    print(summarize(indexed))
+
+    print("\nNormal query plan:")
+    print(normal_plan)
+
+    print("\nAlternative query plan:")
+    print(indexed_plan)
 
 
 if __name__ == "__main__":
