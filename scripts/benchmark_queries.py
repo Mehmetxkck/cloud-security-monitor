@@ -2,12 +2,20 @@
 import time
 import statistics
 import psycopg
+from app.config import (
+    DB_HOST,
+    DB_PORT,
+    DB_USER,
+    DB_PASSWORD,
+    BENCHMARK_DB_NAME,
+)
 
 DB_CONFIG = {
-    "dbname": "security_monitor",
-    "user": "mehmetkocak",
-    "host": "localhost",
-    "port": 5432
+    "dbname": BENCHMARK_DB_NAME,
+    "user": DB_USER,
+    "password": DB_PASSWORD,
+    "host": DB_HOST,
+    "port": DB_PORT,
 }
 
 QUERY = """

@@ -1,44 +1,58 @@
 
-import pytest
 import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
 import psycopg
 
 from app import database
+from app.config import (
+    DB_HOST,
+    DB_PORT,
+    DB_USER,
+    DB_PASSWORD,
+    DB_NAME,
+    TEST_DB_NAME,
+    BENCHMARK_DB_NAME,
+)
 
 
-TEST_DB_NAME = "security_monitor_test"
-
-
-def test_fetch_logs_from_postgresql(monkeypatch):
-
-    # Test veritabanına bağlantı
-    def test_connection():
-        return psycopg.connect(
-            dbname=TEST_DB_NAME,
-            user="mehmetkocak",
-            host="localhost",
-            port=5432
+# Merkezi ve güvenli test veritabanı bağlantısı
+def _test_db_connection():
+    if not TEST_DB_NAME or TEST_DB_NAME in {
+        DB_NAME,
+        BENCHMARK_DB_NAME,
+    }:
+        raise RuntimeError(
+            "Test database must be isolated."
         )
 
-    # Gerçek veritabanı yerine test DB kullan
+    return psycopg.connect(
+        dbname=TEST_DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT,
+    )
+
+
+# 1. Gerçek PostgreSQL bağlantı testi
+def test_fetch_logs_from_postgresql(monkeypatch):
+
     monkeypatch.setattr(
         database,
         "get_connection",
-        test_connection
+        _test_db_connection
     )
 
-    # Test DB bağlantısını doğrula
-    with test_connection() as connection:
+    with _test_db_connection() as connection:
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT current_database()"
-            )
+            cursor.execute("SELECT current_database()")
             current_db = cursor.fetchone()[0]
 
             assert current_db == TEST_DB_NAME
 
-            # Yalnızca test veritabanındaki
-            # belirli test kaydını temizle
+            # Önceki test kaydını temizle
             cursor.execute(
                 """
                 DELETE FROM security_logs
@@ -73,14 +87,12 @@ def test_fetch_logs_from_postgresql(monkeypatch):
         connection.commit()
 
     try:
-        # Gerçek PostgreSQL sorgusunu çalıştır
         logs = database.fetch_all_logs(
             ip_address="198.51.100.42",
             limit=10,
             offset=0
         )
 
-        # Sonuçları doğrula
         assert len(logs) == 1
         assert logs[0]["ip_address"] == "198.51.100.42"
         assert logs[0]["username"] == "integration_test"
@@ -88,7 +100,7 @@ def test_fetch_logs_from_postgresql(monkeypatch):
 
     finally:
         # Test verisini temizle
-        with test_connection() as connection:
+        with _test_db_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -102,36 +114,31 @@ def test_fetch_logs_from_postgresql(monkeypatch):
             connection.commit()
 
 
+# Ortak test verisi fixture
 @pytest.fixture
 def sample_database_logs(monkeypatch):
-    # Test veritabanı bağlantısı
-    def test_connection():
-        return psycopg.connect(
-            dbname="security_monitor_test",
-            user="mehmetkocak",
-            host="localhost",
-            port=5432
-        )
 
     monkeypatch.setattr(
         database,
         "get_connection",
-        test_connection
+        _test_db_connection
     )
 
     # Yanlış veritabanında işlem yapılmasını önle
-    with test_connection() as connection:
+    with _test_db_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT current_database()")
-            assert cursor.fetchone()[0] == "security_monitor_test"
+
+            assert cursor.fetchone()[0] == TEST_DB_NAME
 
     # Her test için benzersiz kullanıcı adı
     username = f"test_{uuid.uuid4().hex[:12]}"
     inserted_ids = []
 
     try:
-        with test_connection() as connection:
+        with _test_db_connection() as connection:
             with connection.cursor() as cursor:
+
                 for second, ip in enumerate([
                     "198.51.100.71",
                     "198.51.100.71",
@@ -140,8 +147,13 @@ def sample_database_logs(monkeypatch):
                     cursor.execute(
                         """
                         INSERT INTO security_logs
-                        (timestamp, ip_address, username,
-                         event_type, status)
+                        (
+                            timestamp,
+                            ip_address,
+                            username,
+                            event_type,
+                            status
+                        )
                         VALUES (%s, %s, %s, %s, %s)
                         RETURNING id
                         """,
@@ -153,7 +165,10 @@ def sample_database_logs(monkeypatch):
                             "failed"
                         )
                     )
-                    inserted_ids.append(cursor.fetchone()[0])
+
+                    inserted_ids.append(
+                        cursor.fetchone()[0]
+                    )
 
             connection.commit()
 
@@ -162,17 +177,22 @@ def sample_database_logs(monkeypatch):
     finally:
         # Sadece bu testin eklediği kayıtları temizle
         if inserted_ids:
-            with test_connection() as connection:
+            with _test_db_connection() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "DELETE FROM security_logs WHERE id = ANY(%s)",
+                        """
+                        DELETE FROM security_logs
+                        WHERE id = ANY(%s)
+                        """,
                         (inserted_ids,)
                     )
+
                 connection.commit()
 
 
 # 2. Gerçek IP filtreleme testi
 def test_postgresql_ip_filter(sample_database_logs):
+
     username, ids = sample_database_logs
 
     logs = database.fetch_all_logs(
@@ -187,6 +207,7 @@ def test_postgresql_ip_filter(sample_database_logs):
     ]
 
     assert len(matching) == 2
+
     assert all(
         log["ip_address"] == "198.51.100.71"
         for log in matching
@@ -195,6 +216,7 @@ def test_postgresql_ip_filter(sample_database_logs):
 
 # 3. Gerçek LIMIT testi
 def test_postgresql_limit(sample_database_logs):
+
     username, ids = sample_database_logs
 
     logs = database.fetch_all_logs(
@@ -207,6 +229,7 @@ def test_postgresql_limit(sample_database_logs):
 
 # 4. Gerçek OFFSET testi
 def test_postgresql_offset(sample_database_logs):
+
     username, ids = sample_database_logs
 
     first_page = database.fetch_all_logs(
@@ -221,36 +244,30 @@ def test_postgresql_offset(sample_database_logs):
 
     assert len(first_page) == 1
     assert len(second_page) == 1
+
     assert first_page[0]["id"] != second_page[0]["id"]
 
 
+# 5. Detection fonksiyonunun 100'den fazla log okuma testi
 def test_detection_fetches_more_than_100_logs(monkeypatch):
-    import uuid
 
-    test_db = "security_monitor_test"
     test_ip = "198.51.100.99"
     test_username = f"bulk_{uuid.uuid4().hex[:12]}"
     inserted_ids = []
 
-    def test_connection():
-        return psycopg.connect(
-            dbname=test_db,
-            user="mehmetkocak",
-            host="localhost",
-            port=5432
-        )
-
     monkeypatch.setattr(
         database,
         "get_connection",
-        test_connection
+        _test_db_connection
     )
 
     try:
-        with test_connection() as connection:
+        with _test_db_connection() as connection:
             with connection.cursor() as cursor:
+
                 cursor.execute("SELECT current_database()")
-                assert cursor.fetchone()[0] == test_db
+
+                assert cursor.fetchone()[0] == TEST_DB_NAME
 
                 for i in range(105):
                     cursor.execute(
@@ -279,7 +296,9 @@ def test_detection_fetches_more_than_100_logs(monkeypatch):
                         )
                     )
 
-                    inserted_ids.append(cursor.fetchone()[0])
+                    inserted_ids.append(
+                        cursor.fetchone()[0]
+                    )
 
         # Gerçek PostgreSQL sorgusu
         logs = database.fetch_logs_for_detection()
@@ -295,7 +314,7 @@ def test_detection_fetches_more_than_100_logs(monkeypatch):
     finally:
         # Test kayıtlarını temizle
         if inserted_ids:
-            with test_connection() as connection:
+            with _test_db_connection() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
@@ -306,34 +325,27 @@ def test_detection_fetches_more_than_100_logs(monkeypatch):
                     )
 
 
+# 6. Güvenlik istatistikleri zaman filtreleme testi
 def test_security_stats_time_filter(monkeypatch):
-    from datetime import datetime, timedelta, timezone
-    import uuid
 
-    test_db = "security_monitor_test"
     test_ip = "198.51.100.88"
     test_username = f"time_{uuid.uuid4().hex[:12]}"
     inserted_ids = []
 
-    def test_connection():
-        return psycopg.connect(
-            dbname=test_db,
-            user="mehmetkocak",
-            host="localhost",
-            port=5432
-        )
-
     monkeypatch.setattr(
         database,
         "get_connection",
-        test_connection
+        _test_db_connection
     )
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(
+        tzinfo=None
+    )
 
     try:
-        with test_connection() as connection:
+        with _test_db_connection() as connection:
             with connection.cursor() as cursor:
+
                 for timestamp in [
                     now - timedelta(hours=2),
                     now - timedelta(hours=48)
@@ -341,8 +353,13 @@ def test_security_stats_time_filter(monkeypatch):
                     cursor.execute(
                         """
                         INSERT INTO security_logs
-                        (timestamp, ip_address, username,
-                         event_type, status)
+                        (
+                            timestamp,
+                            ip_address,
+                            username,
+                            event_type,
+                            status
+                        )
                         VALUES (%s, %s, %s, %s, %s)
                         RETURNING id
                         """,
@@ -354,10 +371,18 @@ def test_security_stats_time_filter(monkeypatch):
                             "failed"
                         )
                     )
-                    inserted_ids.append(cursor.fetchone()[0])
 
-        stats_24h = database.fetch_security_stats(hours=24)
-        stats_72h = database.fetch_security_stats(hours=72)
+                    inserted_ids.append(
+                        cursor.fetchone()[0]
+                    )
+
+        stats_24h = database.fetch_security_stats(
+            hours=24
+        )
+
+        stats_72h = database.fetch_security_stats(
+            hours=72
+        )
 
         def attempts_for_ip(stats):
             return next(
@@ -374,9 +399,12 @@ def test_security_stats_time_filter(monkeypatch):
 
     finally:
         if inserted_ids:
-            with test_connection() as connection:
+            with _test_db_connection() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "DELETE FROM security_logs WHERE id = ANY(%s)",
+                        """
+                        DELETE FROM security_logs
+                        WHERE id = ANY(%s)
+                        """,
                         (inserted_ids,)
                     )

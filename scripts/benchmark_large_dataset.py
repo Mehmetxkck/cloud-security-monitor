@@ -1,7 +1,13 @@
 
 import statistics
 import time
-
+from app.config import (
+    DB_HOST,
+    DB_PORT,
+    DB_USER,
+    DB_PASSWORD,
+    BENCHMARK_DB_NAME,
+)
 import psycopg
 
 DB_CONFIG = {
