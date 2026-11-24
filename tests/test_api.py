@@ -336,3 +336,75 @@ def test_security_stats_invalid_hours():
 
     response = client.get("/security/stats?hours=721")
     assert response.status_code == 422
+
+
+def test_failed_logs_returns_database_counts(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+
+    expected_counts = {
+        "198.51.100.10": 8,
+        "198.51.100.20": 3
+    }
+
+    monkeypatch.setattr(
+        main,
+        "fetch_failed_logins_by_ip",
+        lambda: expected_counts
+    )
+
+    client = TestClient(main.app)
+
+    response = client.get("/logs/failed")
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "failed_logins_by_ip": expected_counts
+    }
+
+
+def test_failed_logs_empty_database(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+
+    monkeypatch.setattr(
+        main,
+        "fetch_failed_logins_by_ip",
+        lambda: {}
+    )
+
+    client = TestClient(main.app)
+
+    response = client.get("/logs/failed")
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "failed_logins_by_ip": {}
+    }
+
+
+def test_failed_logs_database_unavailable(monkeypatch):
+    from fastapi.testclient import TestClient
+    from psycopg import OperationalError
+    from app import main
+
+    def raise_database_error():
+        raise OperationalError("Database unavailable")
+
+    monkeypatch.setattr(
+        main,
+        "fetch_failed_logins_by_ip",
+        raise_database_error
+    )
+
+    client = TestClient(main.app)
+
+    response = client.get("/logs/failed")
+
+    assert response.status_code == 503
+
+    assert response.json() == {
+        "detail": "Database service unavailable"
+    }

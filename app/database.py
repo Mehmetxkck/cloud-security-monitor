@@ -20,10 +20,9 @@ def get_connection():
         port=DB_PORT,
     )
 
-    return connection
-
-
 # PostgreSQL'den güvenlik loglarını getir
+
+
 def fetch_all_logs(
     ip_address=None,
     limit=100,
@@ -240,4 +239,33 @@ def fetch_security_stats(hours=None):
             }
             for row in rows
         ]
+    }
+
+
+def fetch_failed_logins_by_ip():
+    """
+    PostgreSQL'deki başarısız girişleri
+    IP adresine göre gruplandırır.
+    """
+
+    query = """
+        SELECT ip_address, COUNT(*) AS failed_attempts
+        FROM security_logs
+        WHERE event_type = %s
+        GROUP BY ip_address
+        ORDER BY failed_attempts DESC, ip_address ASC
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                ("login_failed",)
+            )
+
+            rows = cursor.fetchall()
+
+    return {
+        row[0]: row[1]
+        for row in rows
     }

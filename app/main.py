@@ -9,12 +9,8 @@ from app.database import (
     save_security_alert,
     fetch_security_alerts,
     fetch_logs_for_detection,
-    fetch_security_stats
-)
-
-from app.log_parser import (
-    load_logs,
-    count_failed_logins
+    fetch_security_stats,
+    fetch_failed_logins_by_ip
 )
 
 from app.services.detection_engine import (
@@ -82,17 +78,23 @@ def get_logs(
         )
 
 
-# Başarısız giriş istatistikleri
-# Şimdilik JSON dosyasını kullanır
+# PostgreSQL'den başarısız giriş istatistiklerini getir
 @app.get("/logs/failed")
 def get_failed_logs():
-    logs = load_logs()
+    try:
+        failed_logins = fetch_failed_logins_by_ip()
 
-    failed_logins = count_failed_logins(logs)
+        return {
+            "failed_logins_by_ip": failed_logins
+        }
 
-    return {
-        "failed_logins_by_ip": failed_logins
-    }
+    except OperationalError:
+        logger.exception("Database connection failed")
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service unavailable"
+        )
 
 
 @app.post("/security/analyze")

@@ -11,10 +11,11 @@ from app.config import (
 import psycopg
 
 DB_CONFIG = {
-    "dbname": "security_monitor_benchmark",
-    "user": "mehmetkocak",
-    "host": "localhost",
-    "port": 5432,
+    "dbname": BENCHMARK_DB_NAME,
+    "user": DB_USER,
+    "password": DB_PASSWORD,
+    "host": DB_HOST,
+    "port": DB_PORT,
 }
 
 QUERY = """

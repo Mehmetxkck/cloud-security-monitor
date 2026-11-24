@@ -408,3 +408,92 @@ def test_security_stats_time_filter(monkeypatch):
                         """,
                         (inserted_ids,)
                     )
+
+
+def test_failed_logins_aggregation(monkeypatch):
+    from uuid import uuid4
+    from datetime import datetime, timedelta
+    from app import database
+
+    monkeypatch.setattr(
+        database,
+        "get_connection",
+        _test_db_connection
+    )
+
+    username = f"aggregation_{uuid4().hex}"
+
+    ip_one = "198.51.100.181"
+    ip_two = "198.51.100.182"
+    ip_three = "198.51.100.183"
+
+    base_time = datetime(2026, 11, 24, 10, 0, 0)
+
+    records = [
+        (ip_one, "login_failed", "failed"),
+        (ip_one, "login_failed", "failed"),
+        (ip_one, "login_failed", "failed"),
+        (ip_two, "login_failed", "failed"),
+        (ip_two, "login_failed", "failed"),
+        (ip_one, "login_success", "success"),
+        (ip_three, "login_success", "success"),
+    ]
+
+    before = database.fetch_failed_logins_by_ip()
+
+    try:
+        with _test_db_connection() as connection:
+            with connection.cursor() as cursor:
+
+                for index, record in enumerate(records):
+                    ip, event_type, status = record
+
+                    cursor.execute(
+                        """
+                        INSERT INTO security_logs
+                        (
+                            timestamp,
+                            ip_address,
+                            username,
+                            event_type,
+                            status
+                        )
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            base_time + timedelta(seconds=index),
+                            ip,
+                            username,
+                            event_type,
+                            status
+                        )
+                    )
+
+        after = database.fetch_failed_logins_by_ip()
+
+        assert after.get(ip_one, 0) == (
+            before.get(ip_one, 0) + 3
+        )
+
+        assert after.get(ip_two, 0) == (
+            before.get(ip_two, 0) + 2
+        )
+
+        assert after.get(ip_three, 0) == (
+            before.get(ip_three, 0)
+        )
+
+        assert sum(after.values()) == (
+            sum(before.values()) + 5
+        )
+
+    finally:
+        with _test_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM security_logs
+                    WHERE username = %s
+                    """,
+                    (username,)
+                )
