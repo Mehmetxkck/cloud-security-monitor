@@ -148,4 +148,3 @@ CREATE INDEX idx_security_logs_event_timestamp ON public.security_logs USING btr
 --
 
 \unrestrict J43luG8vbGc6pFDUCyB5SAd4VYQSmGJlWYcR7rhqHHh4uNdgclMhB4NTDVVnBaq
-

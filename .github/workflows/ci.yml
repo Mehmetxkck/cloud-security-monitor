@@ -1,0 +1,135 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Docker Build and Automated Tests
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare CI environment
+        run: |
+          CI_DB_PASSWORD=$(openssl rand -hex 24)
+
+          echo "::add-mask::$CI_DB_PASSWORD"
+
+          cp .env.docker.example .env.docker
+
+          sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$CI_DB_PASSWORD/" .env.docker
+
+          sed -i "s/^APP_ENV=.*/APP_ENV=testing/" .env.docker
+
+      - name: Validate Docker Compose configuration
+        run: |
+          docker compose --env-file .env.docker config --quiet
+
+      - name: Build Docker image
+        run: |
+          docker compose --env-file .env.docker build api
+
+      - name: Start application and PostgreSQL
+        run: |
+          docker compose --env-file .env.docker up -d
+
+      - name: Wait for API readiness
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/health > /dev/null; then
+              echo "API is ready."
+              exit 0
+            fi
+
+            echo "Waiting for API: attempt $attempt/30"
+            sleep 2
+          done
+
+          echo "API failed to start."
+          exit 1
+
+      - name: Verify database connection
+        run: |
+          docker compose --env-file .env.docker exec -T api \
+            python -c "from app.database import get_connection; conn = get_connection(); conn.close(); print('Database connection successful')"
+
+      - name: Run automated tests
+        run: |
+          docker compose --env-file .env.docker exec -T api \
+            python -m pytest -q -p no:cacheprovider
+
+      - name: Run API smoke tests
+        run: |
+          python3 - <<'PY'
+          import json
+          from urllib.request import urlopen, Request
+
+          base_url = "http://localhost:8000"
+
+          def request_json(path, method="GET"):
+              request = Request(
+                  base_url + path,
+                  method=method
+              )
+
+              with urlopen(request, timeout=10) as response:
+                  assert response.status == 200
+                  return json.load(response)
+
+          health = request_json("/health")
+          assert health == {"status": "healthy"}
+
+          logs = request_json("/logs")
+          assert logs["total_returned"] == 0
+          assert logs["logs"] == []
+
+          failed = request_json("/logs/failed")
+          assert failed == {"failed_logins_by_ip": {}}
+
+          stats = request_json("/security/stats")
+          assert stats["total_logs"] == 0
+          assert stats["failed_logins"] == 0
+          assert stats["top_ips"] == []
+
+          alerts = request_json("/security/alerts")
+          assert alerts["total_alerts"] == 0
+          assert alerts["alerts"] == []
+
+          analysis = request_json(
+              "/security/analyze",
+              method="POST"
+          )
+
+          assert analysis["analyzed_logs"] == 0
+          assert analysis["detected_ips"] == 0
+
+          print("All API smoke tests passed.")
+          PY
+
+      - name: Display container logs on failure
+        if: failure()
+        run: |
+          docker compose --env-file .env.docker logs --no-color
+
+      - name: Clean up CI environment
+        if: always()
+        run: |
+          docker compose --env-file .env.docker down -v --remove-orphans
+          rm -f .env.docker
