@@ -1,4 +1,5 @@
 
+from datetime import datetime, timedelta, timezone
 import psycopg
 
 
@@ -171,12 +172,26 @@ def fetch_logs_for_detection():
     return logs
 
 
-def fetch_security_stats():
+def fetch_security_stats(hours=None):
+    start_time = None
+
+    if hours is not None:
+        start_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(hours=hours)
+        )
+
     with get_connection() as connection:
         with connection.cursor() as cursor:
 
             cursor.execute(
-                "SELECT COUNT(*) FROM security_logs"
+                """
+                SELECT COUNT(*)
+                FROM security_logs
+                WHERE (%s::timestamp IS NULL
+                       OR timestamp >= %s::timestamp)
+                """,
+                (start_time, start_time)
             )
             total_logs = cursor.fetchone()[0]
 
@@ -185,8 +200,10 @@ def fetch_security_stats():
                 SELECT COUNT(*)
                 FROM security_logs
                 WHERE event_type = %s
+                  AND (%s::timestamp IS NULL
+                       OR timestamp >= %s::timestamp)
                 """,
-                ("login_failed",)
+                ("login_failed", start_time, start_time)
             )
             failed_logins = cursor.fetchone()[0]
 
@@ -195,25 +212,24 @@ def fetch_security_stats():
                 SELECT ip_address, COUNT(*) AS attempts
                 FROM security_logs
                 WHERE event_type = %s
+                  AND (%s::timestamp IS NULL
+                       OR timestamp >= %s::timestamp)
                 GROUP BY ip_address
                 ORDER BY attempts DESC, ip_address ASC
                 LIMIT 5
                 """,
-                ("login_failed",)
+                ("login_failed", start_time, start_time)
             )
-
             rows = cursor.fetchall()
-
-    top_ips = [
-        {
-            "ip_address": row[0],
-            "failed_attempts": row[1]
-        }
-        for row in rows
-    ]
 
     return {
         "total_logs": total_logs,
         "failed_logins": failed_logins,
-        "top_ips": top_ips
+        "top_ips": [
+            {
+                "ip_address": row[0],
+                "failed_attempts": row[1]
+            }
+            for row in rows
+        ]
     }

@@ -147,9 +147,15 @@ def get_security_alerts():
 
 
 @app.get("/security/stats")
-def get_security_stats():
+def get_security_stats(
+    hours: int | None = Query(
+        default=None,
+        ge=1,
+        le=720
+    )
+):
     try:
-        return fetch_security_stats()
+        return fetch_security_stats(hours=hours)
 
     except OperationalError:
         logger.exception("Database connection failed")

@@ -304,3 +304,79 @@ def test_detection_fetches_more_than_100_logs(monkeypatch):
                         """,
                         (inserted_ids,)
                     )
+
+
+def test_security_stats_time_filter(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import uuid
+
+    test_db = "security_monitor_test"
+    test_ip = "198.51.100.88"
+    test_username = f"time_{uuid.uuid4().hex[:12]}"
+    inserted_ids = []
+
+    def test_connection():
+        return psycopg.connect(
+            dbname=test_db,
+            user="mehmetkocak",
+            host="localhost",
+            port=5432
+        )
+
+    monkeypatch.setattr(
+        database,
+        "get_connection",
+        test_connection
+    )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    try:
+        with test_connection() as connection:
+            with connection.cursor() as cursor:
+                for timestamp in [
+                    now - timedelta(hours=2),
+                    now - timedelta(hours=48)
+                ]:
+                    cursor.execute(
+                        """
+                        INSERT INTO security_logs
+                        (timestamp, ip_address, username,
+                         event_type, status)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            timestamp,
+                            test_ip,
+                            test_username,
+                            "login_failed",
+                            "failed"
+                        )
+                    )
+                    inserted_ids.append(cursor.fetchone()[0])
+
+        stats_24h = database.fetch_security_stats(hours=24)
+        stats_72h = database.fetch_security_stats(hours=72)
+
+        def attempts_for_ip(stats):
+            return next(
+                (
+                    item["failed_attempts"]
+                    for item in stats["top_ips"]
+                    if item["ip_address"] == test_ip
+                ),
+                0
+            )
+
+        assert attempts_for_ip(stats_24h) == 1
+        assert attempts_for_ip(stats_72h) == 2
+
+    finally:
+        if inserted_ids:
+            with test_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM security_logs WHERE id = ANY(%s)",
+                        (inserted_ids,)
+                    )

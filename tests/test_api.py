@@ -298,10 +298,41 @@ def test_security_stats_endpoint(monkeypatch):
 
     monkeypatch.setattr(
         "app.main.fetch_security_stats",
-        lambda: sample_stats
+        lambda hours=None: sample_stats
     )
 
     response = client.get("/security/stats")
 
     assert response.status_code == 200
     assert response.json() == sample_stats
+
+
+def test_security_stats_hours_filter(monkeypatch):
+    received_hours = []
+
+    def fake_stats(hours=None):
+        received_hours.append(hours)
+        return {
+            "total_logs": 5,
+            "failed_logins": 3,
+            "top_ips": []
+        }
+
+    monkeypatch.setattr(
+        "app.main.fetch_security_stats",
+        fake_stats
+    )
+
+    response = client.get("/security/stats?hours=24")
+
+    assert response.status_code == 200
+    assert received_hours == [24]
+    assert response.json()["total_logs"] == 5
+
+
+def test_security_stats_invalid_hours():
+    response = client.get("/security/stats?hours=-5")
+    assert response.status_code == 422
+
+    response = client.get("/security/stats?hours=721")
+    assert response.status_code == 422
